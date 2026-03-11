@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TGL Season 2 · Bet Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, onValue, set, push, update, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    const firebaseConfig = {
+      apiKey: "AIzaSyCfwsmHnLa-CKj3BxSy3stmSFYyolL40qw",
+      authDomain: "tgl-tracker.firebaseapp.com",
+      databaseURL: "https://tgl-tracker-default-rtdb.firebaseio.com",
+      projectId: "tgl-tracker",
+      storageBucket: "tgl-tracker.firebasestorage.app",
+      messagingSenderId: "295539289977",
+      appId: "1:295539289977:web:73300c987f5cb7acfac9a8",
+      measurementId: "G-BVTR2GR0RS"
+    };
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    window.__tglDB = db;
+    window.__tglRef = ref;
+    window.__tglOnValue = onValue;
+    window.__tglSet = set;
+    window.__tglPush = push;
+    window.__tglUpdate = update;
+    window.__tglRemove = remove;
+    window.__firebaseReady = true;
+    window.dispatchEvent(new Event("firebaseReady"));
+  </script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #f4f5f7; font-family: 'Trebuchet MS', Arial, sans-serif; color: #1a1a1a; }
+    button { cursor: pointer; transition: all 0.15s; }
+    button:hover { filter: brightness(0.93); }
+    input, textarea, select { font-family: inherit; }
+    textarea:focus, input:focus, select:focus { outline: 2px solid #1670CC44; }
+    .sync-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const PAST_RESULTS = [
+      { date: "Dec 28", matchup: "Atlanta vs New York",  betWinner: "Rudy",  score: "6-4" },
+      { date: "Jan 3",  matchup: "Boston vs LA",          betWinner: "Jacki", score: "7-5" },
+      { date: "Jan 6",  matchup: "Atlanta vs The Bay",    betWinner: "Rudy",  score: "7-4" },
+      { date: "Jan 14", matchup: "Jupiter vs New York",   betWinner: "Jacki", score: "No ATL/BOS" },
+      { date: "Jan 21", matchup: "Jupiter vs LA",         betWinner: "Jacki", score: "No ATL/BOS" },
+      { date: "Jan 27", matchup: "Boston vs The Bay",     betWinner: "Jacki", score: "9-1" },
+      { date: "Feb 2",  matchup: "Atlanta vs Jupiter",    betWinner: "Jacki", score: "8-6" },
+      { date: "Feb 9",  matchup: "The Bay vs LA",         betWinner: "Rudy",  score: "The Bay won" },
+    ];
+    const LAST_PAST_WINNER = "Rudy";
+    const POINTS_WIN = 25;
+    const POINTS_DIRECT = 50;
+    const POINTS_CHAMP = 100;
+    const REMAINING = [
+      { id: "feb23a", date: "Feb 23", matchup: "Atlanta vs Boston",   teams: ["Atlanta","Boston"],   type: "direct",  betMap: { Atlanta:"Rudy", Boston:"Jacki" },    hot: true  },
+      { id: "feb23b", date: "Feb 23", matchup: "Atlanta vs LA",       teams: ["Atlanta","LA"],        type: "stake",   betMap: { Atlanta:"Rudy", LA:"Jacki" },         hot: false },
+      { id: "feb24",  date: "Feb 24", matchup: "New York vs The Bay", teams: ["New York","The Bay"],  type: "neutral", prevId: "feb23b",                               hot: false },
+      { id: "feb25",  date: "Feb 25", matchup: "Boston vs New York",  teams: ["Boston","New York"],   type: "stake",   betMap: { Boston:"Jacki", "New York":"Rudy" },   hot: false },
+      { id: "mar1",   date: "Mar 1",  matchup: "Jupiter vs Boston",   teams: ["Jupiter","Boston"],    type: "stake",   betMap: { Boston:"Jacki", Jupiter:"Rudy" },      hot: false },
+      { id: "mar3",   date: "Mar 3",  matchup: "LA vs New York",      teams: ["LA","New York"],       type: "neutral", prevId: "mar1",                                 hot: false },
+      { id: "mar4",   date: "Mar 4",  matchup: "The Bay vs Jupiter",  teams: ["The Bay","Jupiter"],   type: "neutral", prevId: "mar3",                                 hot: false },
+    ];
+    const MATCH_OPTIONS = [
+      { id: "feb23a", label: "Feb 23 · Atlanta vs Boston (Direct 🔥)" },
+      { id: "feb23b", label: "Feb 23 · Atlanta vs LA" },
+      { id: "feb24",  label: "Feb 24 · New York vs The Bay" },
+      { id: "feb25",  label: "Feb 25 · Boston vs New York" },
+      { id: "mar1",   label: "Mar 1 · Jupiter vs Boston" },
+      { id: "mar3",   label: "Mar 3 · LA vs New York" },
+      { id: "mar4",   label: "Mar 4 · The Bay vs Jupiter" },
+      { id: "semi1",  label: "Mar 17 · SF: Atlanta vs LA (Playoff)" },
+      { id: "semi2",  label: "Mar 17 · SF: Jupiter vs Boston (Playoff)" },
+      { id: "finals", label: "Finals Series (Best of 3)" },
+    ];
+    const SEMIFINALS = [
+      { id: "semi1", date: "Mar 17", time: "6:30 PM ET", matchup: "Atlanta Drive vs Los Angeles GC", teams: ["Atlanta","LA"], type: "stake", betMap: { Atlanta:"Rudy", LA:"Jacki" } },
+      { id: "semi2", date: "Mar 17", time: "9:00 PM ET", matchup: "Jupiter Links vs Boston Common", teams: ["Jupiter","Boston"], type: "stake", betMap: { Jupiter:"Rudy", Boston:"Jacki" } },
+    ];
+    const FINALS_MATCHES = [
+      { id: "finals1", label: "Match 1", date: "Mar 23, 9 PM ET" },
+      { id: "finals2", label: "Match 2", date: "Mar 24, 7 PM ET" },
+      { id: "finals3", label: "Match 3 (if needed)", date: "Mar 24, 9 PM ET" },
+    ];
+    const POINTS_SEMI = 50;
+    const POINTS_FINAL = 75;
+    const R = "#D63030";
+    const J = "#1670CC";
+    const GOLD = "#c8860a";
+    const GREEN = "#16a34a";
+
+    // ── WAGER FORM ────────────────────────────────────────────────────────────
+    function WagerForm({ currentUser, onSubmit, onCancel }) {
+      const [scope, setScope] = useState("match");
+      const [matchId, setMatchId] = useState("feb23a");
+      const [terms, setTerms] = useState("");
+      const [side, setSide] = useState(currentUser);
+      const opponent = currentUser === "Rudy" ? "Jacki" : "Rudy";
+      const inp = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ddd", background: "#fafbfc", fontSize: 14, color: "#333" };
+      const lbl = { fontSize: 12, color: "#888", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 };
+      const handleSubmit = () => {
+        if (!terms.trim()) return;
+        onSubmit({
+          proposedBy: currentUser,
+          scope,
+          matchId: scope === "match" ? matchId : null,
+          matchLabel: scope === "match" ? MATCH_OPTIONS.find(m => m.id === matchId)?.label : "Overall Competition",
+          terms: terms.trim(),
+          predictedWinner: side,
+          status: "pending",
+          createdAt: Date.now(),
+        });
+      };
+      return (
+        <div style={{ background: "#fff", borderRadius: 12, border: `2px solid ${R === currentUser ? R : J}22`, padding: "20px 18px", boxShadow: "0 1px 8px rgba(0,0,0,0.07)" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#222", marginBottom: 18 }}>📝 Propose a Side Wager to {opponent}</div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={lbl}>Wager Scope</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[["match","Specific Match"],["overall","Overall Competition"]].map(([v, l]) => (
+                <button key={v} onClick={() => setScope(v)} style={{ flex: 1, padding: "10px 8px", borderRadius: 8, fontSize: 14, fontWeight: scope === v ? 700 : 500, border: scope === v ? `2px solid ${J}` : "2px solid #ddd", background: scope === v ? `${J}12` : "#fafbfc", color: scope === v ? J : "#666" }}>{l}</button>
+              ))}
+            </div>
+          </div>
+          {scope === "match" && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={lbl}>Match</label>
+              <select value={matchId} onChange={e => setMatchId(e.target.value)} style={inp}>
+                {MATCH_OPTIONS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            </div>
+          )}
+          <div style={{ marginBottom: 14 }}>
+            <label style={lbl}>I'm picking</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {["Rudy","Jacki"].map(p => {
+                const clr = p === "Rudy" ? R : J;
+                const isSel = side === p;
+                return (
+                  <button key={p} onClick={() => setSide(p)} style={{ flex: 1, padding: "10px 8px", borderRadius: 8, fontSize: 14, fontWeight: isSel ? 700 : 500, border: isSel ? `2px solid ${clr}` : "2px solid #ddd", background: isSel ? `${clr}12` : "#fafbfc", color: isSel ? clr : "#666" }}>
+                    {p} {p === currentUser ? "(me)" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{ marginBottom: 18 }}>
+            <label style={lbl}>If I'm wrong, I owe {opponent}:</label>
+            <textarea value={terms} onChange={e => setTerms(e.target.value)} placeholder='e.g. "dinner", "bragging rights for a month", "$20"…' rows={2} style={{ ...inp, resize: "vertical" }} />
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={handleSubmit} disabled={!terms.trim()} style={{ flex: 1, padding: "12px", borderRadius: 10, fontSize: 15, fontWeight: 700, border: "none", background: terms.trim() ? J : "#e0e2e8", color: terms.trim() ? "#fff" : "#bbb" }}>
+              Send Wager
+            </button>
+            <button onClick={onCancel} style={{ padding: "12px 20px", borderRadius: 10, fontSize: 15, border: "1px solid #ddd", background: "#fafbfc", color: "#888", fontWeight: 600 }}>Cancel</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ── WAGER CARD ────────────────────────────────────────────────────────────
+    function WagerCard({ wager, id, currentUser, onAccept, onDecline, onSettle, onDelete }) {
+      const [settling, setSettling] = useState(false);
+      const opponent = wager.proposedBy === "Rudy" ? "Jacki" : "Rudy";
+      const isProposer = currentUser === wager.proposedBy;
+      const isRecipient = currentUser === opponent;
+      const propClr = wager.proposedBy === "Rudy" ? R : J;
+      const pickClr = wager.predictedWinner === "Rudy" ? R : J;
+      const statusMeta = {
+        pending:  { color: GOLD,    label: "⏳ Pending"  },
+        accepted: { color: GREEN,   label: "✅ Active"   },
+        declined: { color: "#ef4444", label: "❌ Declined" },
+        settled:  { color: "#888",  label: "🏁 Settled"  },
+      };
+      const sm = statusMeta[wager.status] || statusMeta.pending;
+      return (
+        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e0e2e8", padding: "16px 18px", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, color: "#bbb", marginBottom: 3 }}>{wager.matchLabel}</div>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>
+                <span style={{ color: propClr }}>{wager.proposedBy}</span>
+                <span style={{ color: "#ccc", fontWeight: 400 }}> → </span>
+                <span style={{ color: opponent === "Rudy" ? R : J }}>{opponent}</span>
+              </div>
+            </div>
+            <div style={{ fontSize: 11, padding: "4px 10px", borderRadius: 20, background: `${sm.color}18`, color: sm.color, fontWeight: 700, flexShrink: 0 }}>{sm.label}</div>
+          </div>
+          <div style={{ background: "#f8f9fb", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 14, color: "#444", lineHeight: 1.5 }}>
+            <span style={{ color: propClr, fontWeight: 700 }}>{wager.proposedBy}</span> picks <span style={{ color: pickClr, fontWeight: 700 }}>{wager.predictedWinner}</span> to win.
+            {" "}If wrong, {wager.proposedBy} owes: <em style={{ color: "#333" }}>"{wager.terms}"</em>
+          </div>
+
+          {wager.status === "pending" && isRecipient && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => onAccept(id)} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 14, fontWeight: 700, border: `2px solid ${GREEN}`, background: `${GREEN}12`, color: GREEN }}>✓ Accept</button>
+              <button onClick={() => onDecline(id)} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 14, fontWeight: 700, border: "2px solid #ef4444", background: "#ef444412", color: "#ef4444" }}>✕ Decline</button>
+            </div>
+          )}
+          {wager.status === "pending" && isProposer && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13, color: "#bbb", fontStyle: "italic" }}>Waiting for {opponent} to respond…</span>
+              <button onClick={() => onDelete(id)} style={{ fontSize: 12, color: "#ccc", border: "none", background: "none", padding: "4px 8px" }}>Withdraw</button>
+            </div>
+          )}
+          {wager.status === "accepted" && !settling && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13, color: GREEN, fontWeight: 600 }}>Wager is on! 🤝</span>
+              <button onClick={() => setSettling(true)} style={{ fontSize: 13, color: J, border: `1px solid ${J}44`, background: `${J}0f`, borderRadius: 7, padding: "5px 12px", fontWeight: 600 }}>Settle</button>
+            </div>
+          )}
+          {wager.status === "accepted" && settling && (
+            <div>
+              <div style={{ fontSize: 13, color: "#888", marginBottom: 8 }}>Who won?</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {["Rudy","Jacki"].map(p => {
+                  const clr = p === "Rudy" ? R : J;
+                  return <button key={p} onClick={() => { onSettle(id, p); setSettling(false); }} style={{ flex: 1, padding: "10px", borderRadius: 8, fontSize: 14, fontWeight: 700, border: `2px solid ${clr}`, background: `${clr}12`, color: clr }}>{p} won</button>;
+                })}
+                <button onClick={() => setSettling(false)} style={{ padding: "10px 14px", borderRadius: 8, fontSize: 13, border: "1px solid #ddd", background: "#fafbfc", color: "#999" }}>↩</button>
+              </div>
+            </div>
+          )}
+          {wager.status === "settled" && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 14 }}>
+                <span style={{ color: wager.settledWinner === "Rudy" ? R : J, fontWeight: 700 }}>{wager.settledWinner}</span>
+                <span style={{ color: "#888" }}> won — </span>
+                {wager.settledWinner === wager.predictedWinner
+                  ? <span style={{ color: propClr, fontWeight: 600 }}>{wager.proposedBy} collects 🎉</span>
+                  : <span style={{ color: propClr, fontWeight: 600 }}>{wager.proposedBy} owes "{wager.terms}"</span>}
+              </div>
+              <button onClick={() => onDelete(id)} style={{ fontSize: 12, color: "#ccc", border: "none", background: "none", padding: "4px 8px" }}>✕</button>
+            </div>
+          )}
+          {wager.status === "declined" && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13, color: "#bbb", fontStyle: "italic" }}>Wager was declined.</span>
+              <button onClick={() => onDelete(id)} style={{ fontSize: 12, color: "#ccc", border: "none", background: "none", padding: "4px 8px" }}>✕</button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── MAIN APP ──────────────────────────────────────────────────────────────
+    function App() {
+      const [results, setResults] = useState({});
+      const [champion, setChampion] = useState(null);
+      const [wagers, setWagers] = useState({});
+      const [flash, setFlash] = useState(null);
+      const [syncStatus, setSyncStatus] = useState("connecting");
+      const [currentUser, setCurrentUser] = useState(() => localStorage.getItem("tgl-user") || null);
+      const [showWagerForm, setShowWagerForm] = useState(false);
+      const dbReady = useRef(false);
+
+      useEffect(() => {
+        const init = () => {
+          if (!window.__firebaseReady) return;
+          dbReady.current = true;
+          const db = window.__tglDB, refFn = window.__tglRef, onValue = window.__tglOnValue;
+          onValue(refFn(db, "tracker"), (snap) => {
+            const val = snap.val() || {};
+            setResults(val.results || {});
+            setChampion(val.champion || null);
+            setSyncStatus("live");
+          }, () => setSyncStatus("error"));
+          onValue(refFn(db, "wagers"), (snap) => setWagers(snap.val() || {}));
+        };
+        if (window.__firebaseReady) init();
+        else window.addEventListener("firebaseReady", init);
+        return () => window.removeEventListener("firebaseReady", init);
+      }, []);
+
+      const persistTracker = (r, c) => {
+        if (!dbReady.current) return;
+        window.__tglSet(window.__tglRef(window.__tglDB, "tracker"), { results: r, champion: c || null });
+      };
+
+      const getBetWinner = (id) => {
+        const match = REMAINING.find(r => r.id === id) || SEMIFINALS.find(r => r.id === id);
+        if (!match) return null;
+        const res = results[id];
+        if (!res) return null;
+        if (match.type === "direct" || match.type === "stake") {
+          const winner = typeof res === "string" ? res : res.winner;
+          return winner ? match.betMap[winner] : null;
+        }
+        if (match.type === "neutral") {
+          if (!res.rudyTeam || !res.winner) return null;
+          return res.winner === res.rudyTeam ? "Rudy" : "Jacki";
+        }
+        return null;
+      };
+
+      const getPrevWinner = (prevId) => prevId ? (getBetWinner(prevId) || null) : LAST_PAST_WINNER;
+
+      const setWinner = (id, team) => {
+        const match = REMAINING.find(r => r.id === id) || SEMIFINALS.find(r => r.id === id);
+        const prev = { ...results };
+        if (match && match.type === "neutral") {
+          const cur = prev[id] || {};
+          prev[id] = cur.winner === team ? { ...cur, winner: null } : { ...cur, winner: team };
+        } else {
+          const cur = typeof prev[id] === "string" ? prev[id] : prev[id]?.winner;
+          if (cur === team) delete prev[id]; else prev[id] = team;
+        }
+        setResults(prev); setFlash(id); setTimeout(() => setFlash(null), 350); persistTracker(prev, champion);
+      };
+
+      const assignNeutral = (id, team, person) => {
+        const match = REMAINING.find(r => r.id === id);
+        const other = match.teams.find(t => t !== team);
+        const updated = { ...results, [id]: { rudyTeam: person === "Rudy" ? team : other, jackiTeam: person === "Jacki" ? team : other, winner: null } };
+        setResults(updated); persistTracker(updated, champion);
+      };
+
+      const toggleChampion = (person) => {
+        const c = champion === person ? null : person;
+        setChampion(c); persistTracker(results, c);
+      };
+
+      // Finals helpers
+      const getFinalsTeams = () => {
+        const s1 = typeof results["semi1"] === "string" ? results["semi1"] : null;
+        const s2 = typeof results["semi2"] === "string" ? results["semi2"] : null;
+        if (!s1 || !s2) return null;
+        return [s1, s2];
+      };
+
+      const getFinalsBetInfo = (teams) => {
+        if (!teams) return null;
+        const hasAtlanta = teams.includes("Atlanta");
+        const hasBoston = teams.includes("Boston");
+        if (hasAtlanta && hasBoston) return { type: "direct", betMap: { Atlanta: "Rudy", Boston: "Jacki" } };
+        if (hasAtlanta) { const other = teams.find(t => t !== "Atlanta"); return { type: "stake", betMap: { Atlanta: "Rudy", [other]: "Jacki" } }; }
+        if (hasBoston) { const other = teams.find(t => t !== "Boston"); return { type: "stake", betMap: { [other]: "Rudy", Boston: "Jacki" } }; }
+        // LA vs Jupiter — neutral, check if assigned
+        const assignment = results["finalsAssign"];
+        if (assignment && assignment.rudyTeam) return { type: "neutral", betMap: { [assignment.rudyTeam]: "Rudy", [assignment.jackiTeam]: "Jacki" } };
+        return { type: "neutral-unset", betMap: null, teams };
+      };
+
+      const getSeriesScore = (teams) => {
+        if (!teams) return null;
+        const score = { [teams[0]]: 0, [teams[1]]: 0 };
+        FINALS_MATCHES.forEach(fm => {
+          const w = typeof results[fm.id] === "string" ? results[fm.id] : null;
+          if (w && score[w] !== undefined) score[w]++;
+        });
+        return score;
+      };
+
+      const assignFinalsTeam = (team, person) => {
+        const ft = getFinalsTeams();
+        if (!ft) return;
+        const other = ft.find(t => t !== team);
+        const updated = { ...results, finalsAssign: { rudyTeam: person === "Rudy" ? team : other, jackiTeam: person === "Jacki" ? team : other } };
+        setResults(updated); persistTracker(updated, champion);
+      };
+
+      const proposeWager = (data) => {
+        if (!dbReady.current) return;
+        window.__tglPush(window.__tglRef(window.__tglDB, "wagers"), data);
+        setShowWagerForm(false);
+      };
+      const updateWager = (id, updates) => { if (dbReady.current) window.__tglUpdate(window.__tglRef(window.__tglDB, `wagers/${id}`), updates); };
+      const deleteWager = (id) => { if (dbReady.current) window.__tglRemove(window.__tglRef(window.__tglDB, `wagers/${id}`)); };
+
+      // Scoring
+      const wins = { Rudy: 0, Jacki: 0 };
+      const pts  = { Rudy: 0, Jacki: 0 };
+      PAST_RESULTS.forEach(r => { if (r.betWinner) { wins[r.betWinner]++; pts[r.betWinner] += POINTS_WIN; } });
+      REMAINING.forEach(r => { const w = getBetWinner(r.id); if (w) { wins[w]++; pts[w] += r.type === "direct" ? POINTS_DIRECT : POINTS_WIN; } });
+      SEMIFINALS.forEach(r => { const w = getBetWinner(r.id); if (w) { wins[w]++; pts[w] += POINTS_SEMI; } });
+      const finalsTeams = getFinalsTeams();
+      const finalsBetInfo = getFinalsBetInfo(finalsTeams);
+      FINALS_MATCHES.forEach(fm => {
+        const w = finalsBetInfo && finalsBetInfo.betMap && results[fm.id] ? finalsBetInfo.betMap[results[fm.id]] : null;
+        if (w) { wins[w]++; pts[w] += POINTS_FINAL; }
+      });
+      if (champion) pts[champion] += POINTS_CHAMP;
+
+      const totalPts = pts.Rudy + pts.Jacki || 1;
+      const rudyPct = (pts.Rudy / totalPts) * 100;
+      const leader = pts.Rudy > pts.Jacki ? "Rudy" : pts.Jacki > pts.Rudy ? "Jacki" : null;
+      const diffPts = Math.abs(pts.Rudy - pts.Jacki);
+      const syncColor = { live: "#22c55e", error: "#ef4444", connecting: "#f59e0b" }[syncStatus];
+      const syncLabel = { live: "Live sync", error: "Sync error", connecting: "Connecting…" }[syncStatus];
+      const wagerList = Object.entries(wagers).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+      const pendingCount = currentUser ? wagerList.filter(([, w]) => w.status === "pending" && w.proposedBy !== currentUser).length : 0;
+      const userClr = currentUser === "Rudy" ? R : J;
+
+      // ── WHO ARE YOU? ──
+      if (!currentUser) {
+        return (
+          <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+            <div style={{ background: "#fff", borderRadius: 16, padding: "36px 28px", maxWidth: 340, width: "100%", boxShadow: "0 4px 24px rgba(0,0,0,0.09)", textAlign: "center" }}>
+              <div style={{ fontSize: 11, letterSpacing: 5, color: "#bbb", textTransform: "uppercase", marginBottom: 20 }}>TGL Season 2 · Bet Tracker</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#222", marginBottom: 8 }}>Who are you?</div>
+              <div style={{ fontSize: 14, color: "#aaa", marginBottom: 28 }}>Pick your name to get started. Your choice is saved to this device.</div>
+              <div style={{ display: "flex", gap: 12 }}>
+                {[["Rudy","Atlanta Drive",R],["Jacki","Boston Common",J]].map(([name, team, clr]) => (
+                  <button key={name} onClick={() => { localStorage.setItem("tgl-user", name); setCurrentUser(name); }} style={{ flex: 1, padding: "18px 8px", borderRadius: 12, border: `2px solid ${clr}44`, background: `${clr}0d`, color: clr }}>
+                    <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 4 }}>{name}</div>
+                    <div style={{ fontSize: 11, color: "#aaa" }}>{team}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div style={{ minHeight: "100vh", paddingBottom: 80 }}>
+
+          {/* SCOREBOARD */}
+          <div style={{ background: "#fff", borderBottom: "2px solid #e0e2e8", padding: "28px 16px 20px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", maxWidth: 580, margin: "0 auto 6px" }}>
+              <div><span className="sync-dot" style={{ background: syncColor }} /><span style={{ fontSize: 11, color: "#aaa" }}>{syncLabel}</span></div>
+              <button onClick={() => { localStorage.removeItem("tgl-user"); setCurrentUser(null); }} style={{ fontSize: 11, color: "#bbb", background: "none", border: "none", padding: "2px 6px" }}>
+                <span style={{ color: userClr, fontWeight: 700 }}>{currentUser}</span> · switch
+              </button>
+            </div>
+            <div style={{ textAlign: "center", fontSize: 11, letterSpacing: 5, color: "#aaa", textTransform: "uppercase", marginBottom: 20 }}>TGL Season 2 · Bet Tracker</div>
+            <div style={{ display: "flex", maxWidth: 580, margin: "0 auto", gap: 10 }}>
+              <ScoreCard name="Rudy" pts={pts.Rudy} wins={wins.Rudy} sub="Atlanta Drive" color={R} />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 44 }}>
+                <div style={{ fontSize: 13, color: "#ccc", fontWeight: 700, marginBottom: 8 }}>VS</div>
+                <div style={{ fontSize: 11, fontWeight: 800, textAlign: "center", lineHeight: 1.6, color: leader ? (leader === "Rudy" ? R : J) : GOLD }}>
+                  {leader ? `${leader}\n+${diffPts}` : "TIE\n🔥"}
+                </div>
+              </div>
+              <ScoreCard name="Jacki" pts={pts.Jacki} wins={wins.Jacki} sub="Boston Common" color={J} />
+            </div>
+            <div style={{ maxWidth: 580, margin: "16px auto 10px", height: 10, borderRadius: 5, background: J, overflow: "hidden" }}>
+              <div style={{ width: `${rudyPct}%`, height: "100%", background: R, transition: "width 0.6s ease" }} />
+            </div>
+            <div style={{ maxWidth: 580, margin: "8px auto 0", display: "flex", justifyContent: "center", gap: 20, flexWrap: "wrap" }}>
+              {[["Win",POINTS_WIN],["Direct",POINTS_DIRECT],["Semifinal",POINTS_SEMI],["Finals",POINTS_FINAL],["Champ",POINTS_CHAMP]].map(([l,p]) => (
+                <div key={l} style={{ fontSize: 11, color: "#bbb" }}><span style={{ color: "#888", fontWeight: 700 }}>{p} pts</span> · {l}</div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ maxWidth: 620, margin: "0 auto", padding: "0 14px" }}>
+
+            {/* PAST */}
+            <SectionLabel>Completed Matches</SectionLabel>
+            <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid #e0e2e8", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+              {PAST_RESULTS.map((r, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", padding: "14px 18px", gap: 12, background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: i < PAST_RESULTS.length - 1 ? "1px solid #e8eaed" : "none" }}>
+                  <div style={{ width: 54, fontSize: 13, color: "#aaa", fontWeight: 600, flexShrink: 0 }}>{r.date}</div>
+                  <div style={{ flex: 1, fontSize: 16, color: "#333", fontWeight: 500 }}>{r.matchup}</div>
+                  <div style={{ fontSize: 13, color: "#bbb", flexShrink: 0 }}>{r.score}</div>
+                  <Badge person={r.betWinner}>+{POINTS_WIN}</Badge>
+                </div>
+              ))}
+            </div>
+
+            {/* UPCOMING */}
+            <SectionLabel style={{ marginTop: 24 }}>Upcoming Matches</SectionLabel>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {REMAINING.map((r) => {
+                const res = results[r.id];
+                const selWinner = typeof res === "string" ? res : res?.winner;
+                const betWinner = getBetWinner(r.id);
+                const matchPts = r.type === "direct" ? POINTS_DIRECT : POINTS_WIN;
+
+                if (r.type === "neutral") {
+                  const prevWinner = getPrevWinner(r.prevId);
+                  const rudyTeam = res?.rudyTeam, jackiTeam = res?.jackiTeam;
+                  const prevClr = prevWinner === "Rudy" ? R : prevWinner === "Jacki" ? J : "#999";
+                  return (
+                    <div key={r.id} style={{ borderRadius: 12, border: "1px solid #e0e2e8", background: flash === r.id ? "#f0f1f4" : "#fff", padding: "16px 18px", transition: "background 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                        <div style={{ width: 54, fontSize: 13, color: "#aaa", fontWeight: 600, flexShrink: 0 }}>{r.date}</div>
+                        <div style={{ flex: 1, fontSize: 17, color: "#222", fontWeight: 600 }}>{r.matchup}</div>
+                        <div style={{ fontSize: 11, color: "#aaa" }}>+{matchPts} pts</div>
+                        <div style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, background: "#f0f1f4", color: "#999", letterSpacing: 1 }}>NEUTRAL</div>
+                      </div>
+                      {!rudyTeam ? (!prevWinner ? (
+                        <div style={{ fontSize: 13, color: "#bbb", fontStyle: "italic" }}>⏳ Waiting on previous match to determine first pick…</div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 13, color: prevClr, fontWeight: 700, marginBottom: 8 }}>⚡ {prevWinner} won last — picks first</div>
+                          <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>Which team does {prevWinner} want?</div>
+                          <div style={{ display: "flex", gap: 10 }}>
+                            {r.teams.map(team => <button key={team} onClick={() => assignNeutral(r.id, team, prevWinner)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, fontFamily: "inherit", fontSize: 15, fontWeight: 600, border: "2px solid #ddd", background: "#fafbfc", color: "#555" }}>{team}</button>)}
+                          </div>
+                        </>
+                      )) : (
+                        <>
+                          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                            <div style={{ flex: 1, padding: "8px 12px", borderRadius: 8, background: `${R}10`, border: `1px solid ${R}33`, fontSize: 14, color: R, fontWeight: 600, textAlign: "center" }}>Rudy → {rudyTeam}</div>
+                            <div style={{ flex: 1, padding: "8px 12px", borderRadius: 8, background: `${J}10`, border: `1px solid ${J}33`, fontSize: 14, color: J, fontWeight: 600, textAlign: "center" }}>Jacki → {jackiTeam}</div>
+                            <button onClick={() => { const u = { ...results }; delete u[r.id]; setResults(u); persistTracker(u, champion); }} style={{ padding: "8px 12px", borderRadius: 8, background: "#f0f1f4", border: "1px solid #ddd", color: "#888", fontSize: 13, fontFamily: "inherit" }}>↩</button>
+                          </div>
+                          <div style={{ fontSize: 13, color: "#888", marginBottom: 8 }}>Who won?</div>
+                          <div style={{ display: "flex", gap: 10 }}>
+                            {r.teams.map(team => {
+                              const owner = team === rudyTeam ? "Rudy" : "Jacki";
+                              const clr = owner === "Rudy" ? R : J;
+                              const isSel = selWinner === team;
+                              return <button key={team} onClick={() => setWinner(r.id, team)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, fontFamily: "inherit", fontSize: 15, fontWeight: isSel ? 800 : 500, border: isSel ? `2px solid ${clr}` : "2px solid #ddd", background: isSel ? `${clr}12` : "#fafbfc", color: isSel ? clr : "#666" }}>{isSel ? "✓ " : ""}{team} · {owner}</button>;
+                            })}
+                          </div>
+                          {betWinner && <div style={{ marginTop: 10, textAlign: "right" }}><Badge person={betWinner}>+{matchPts}</Badge></div>}
+                        </>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={r.id} style={{ borderRadius: 12, border: r.hot ? `2px solid ${GOLD}88` : "1px solid #e0e2e8", background: flash === r.id ? "#f0f1f4" : r.hot ? "#fffbf0" : "#fff", padding: "16px 18px", transition: "background 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                      <div style={{ width: 54, fontSize: 13, color: "#aaa", fontWeight: 600, flexShrink: 0 }}>{r.date}</div>
+                      <div style={{ flex: 1, fontSize: 17, color: "#222", fontWeight: 600 }}>{r.matchup}</div>
+                      {r.hot ? <div style={{ fontSize: 12, color: GOLD, fontWeight: 800 }}>🔥 +{matchPts} pts</div> : <div style={{ fontSize: 11, color: "#aaa" }}>+{matchPts} pts</div>}
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      {r.teams.map(team => {
+                        const owner = r.betMap[team];
+                        const clr = owner === "Rudy" ? R : owner === "Jacki" ? J : "#999";
+                        const isSel = selWinner === team;
+                        return <button key={team} onClick={() => setWinner(r.id, team)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, fontFamily: "inherit", fontSize: 15, fontWeight: isSel ? 800 : 500, border: isSel ? `2px solid ${clr}` : "2px solid #ddd", background: isSel ? `${clr}12` : "#fafbfc", color: isSel ? clr : "#666" }}>{isSel ? "✓ " : ""}{team}{owner ? ` · ${owner}` : ""}</button>;
+                      })}
+                    </div>
+                    {betWinner && <div style={{ marginTop: 10, textAlign: "right" }}><Badge person={betWinner}>+{matchPts}</Badge></div>}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* PLAYOFFS - SEMIFINALS */}
+            <SectionLabel style={{ marginTop: 24 }}>Playoffs · Semifinals · Mar 17</SectionLabel>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {SEMIFINALS.map((r) => {
+                const selWinner = typeof results[r.id] === "string" ? results[r.id] : null;
+                const betWinner = getBetWinner(r.id);
+                return (
+                  <div key={r.id} style={{ borderRadius: 12, border: `2px solid ${GOLD}88`, background: flash === r.id ? "#f0f1f4" : "#fffbf0", padding: "16px 18px", transition: "background 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                      <div style={{ fontSize: 13, color: "#aaa", fontWeight: 600, flexShrink: 0 }}>{r.time}</div>
+                      <div style={{ flex: 1, fontSize: 17, color: "#222", fontWeight: 600 }}>{r.matchup}</div>
+                      <div style={{ fontSize: 12, color: GOLD, fontWeight: 800 }}>+{POINTS_SEMI} pts</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      {r.teams.map(team => {
+                        const owner = r.betMap[team];
+                        const clr = owner === "Rudy" ? R : J;
+                        const isSel = selWinner === team;
+                        return <button key={team} onClick={() => setWinner(r.id, team)} style={{ flex: 1, padding: "13px 8px", borderRadius: 10, fontFamily: "inherit", fontSize: 15, fontWeight: isSel ? 800 : 500, border: isSel ? `2px solid ${clr}` : "2px solid #ddd", background: isSel ? `${clr}12` : "#fafbfc", color: isSel ? clr : "#666" }}>{isSel ? "✓ " : ""}{team} · {owner}</button>;
+                      })}
+                    </div>
+                    {betWinner && <div style={{ marginTop: 10, textAlign: "right" }}><Badge person={betWinner}>+{POINTS_SEMI}</Badge></div>}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* PLAYOFFS - FINALS */}
+            <SectionLabel style={{ marginTop: 24 }}>Finals · Best of 3 · Mar 23–24</SectionLabel>
+            {(() => {
+              const fTeams = getFinalsTeams();
+              if (!fTeams) {
+                return (
+                  <div style={{ borderRadius: 12, border: "1px dashed #e0e2e8", padding: "28px 18px", textAlign: "center", color: "#ccc", fontSize: 14 }}>
+                    Waiting for both semifinals to complete…
+                  </div>
+                );
+              }
+              const fbi = getFinalsBetInfo(fTeams);
+              const series = getSeriesScore(fTeams);
+              const seriesWinner = series && (series[fTeams[0]] >= 2 ? fTeams[0] : series[fTeams[1]] >= 2 ? fTeams[1] : null);
+
+              return (
+                <div style={{ borderRadius: 12, border: `2px solid ${GOLD}88`, background: "#fffdf5", padding: "18px 18px", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#222" }}>{fTeams[0]} vs {fTeams[1]}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: GOLD, letterSpacing: 2 }}>{series[fTeams[0]]} – {series[fTeams[1]]}</div>
+                  </div>
+
+                  {fbi.type === "neutral-unset" && (
+                    <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 8, background: "#f8f9fb", border: "1px solid #e0e2e8" }}>
+                      <div style={{ fontSize: 13, color: "#888", marginBottom: 8 }}>Neither team is a home team — who does Rudy want?</div>
+                      <div style={{ display: "flex", gap: 10 }}>
+                        {fTeams.map(team => <button key={team} onClick={() => assignFinalsTeam(team, "Rudy")} style={{ flex: 1, padding: "12px 8px", borderRadius: 10, fontFamily: "inherit", fontSize: 15, fontWeight: 600, border: "2px solid #ddd", background: "#fafbfc", color: "#555" }}>{team}</button>)}
+                      </div>
+                    </div>
+                  )}
+
+                  {fbi.betMap && (
+                    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                      {Object.entries(fbi.betMap).map(([team, person]) => {
+                        const clr = person === "Rudy" ? R : J;
+                        return <div key={team} style={{ flex: 1, padding: "8px 12px", borderRadius: 8, background: `${clr}10`, border: `1px solid ${clr}33`, fontSize: 14, color: clr, fontWeight: 600, textAlign: "center" }}>{person} → {team}</div>;
+                      })}
+                    </div>
+                  )}
+
+                  {seriesWinner && (
+                    <div style={{ textAlign: "center", padding: "14px", marginBottom: 14, borderRadius: 10, background: `${GOLD}18`, border: `2px solid ${GOLD}66` }}>
+                      <div style={{ fontSize: 20, fontWeight: 900, color: GOLD }}>{seriesWinner} wins the SoFi Cup!</div>
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {FINALS_MATCHES.map((fm, idx) => {
+                      const needMatch3 = series && series[fTeams[0]] === 1 && series[fTeams[1]] === 1;
+                      if (idx === 2 && !needMatch3 && !results["finals3"]) return null;
+                      const selWinner = typeof results[fm.id] === "string" ? results[fm.id] : null;
+                      const betWinner = fbi.betMap && selWinner ? fbi.betMap[selWinner] : null;
+                      const seriesDone = seriesWinner && !selWinner;
+
+                      return (
+                        <div key={fm.id} style={{ padding: "14px 16px", borderRadius: 10, background: "#fff", border: "1px solid #e8eaed" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#555" }}>{fm.label}</div>
+                            <div style={{ fontSize: 12, color: "#bbb" }}>{fm.date}</div>
+                            <div style={{ marginLeft: "auto", fontSize: 12, color: GOLD, fontWeight: 700 }}>+{POINTS_FINAL} pts</div>
+                          </div>
+                          {seriesDone ? (
+                            <div style={{ fontSize: 13, color: "#ccc", fontStyle: "italic" }}>Series already decided</div>
+                          ) : fbi.betMap ? (
+                            <div style={{ display: "flex", gap: 10 }}>
+                              {fTeams.map(team => {
+                                const owner = fbi.betMap[team];
+                                const clr = owner === "Rudy" ? R : J;
+                                const isSel = selWinner === team;
+                                return <button key={team} onClick={() => setWinner(fm.id, team)} style={{ flex: 1, padding: "12px 8px", borderRadius: 10, fontFamily: "inherit", fontSize: 15, fontWeight: isSel ? 800 : 500, border: isSel ? `2px solid ${clr}` : "2px solid #ddd", background: isSel ? `${clr}12` : "#fafbfc", color: isSel ? clr : "#666" }}>{isSel ? "✓ " : ""}{team} · {owner}</button>;
+                              })}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 13, color: "#ccc", fontStyle: "italic" }}>Assign teams above first…</div>
+                          )}
+                          {betWinner && <div style={{ marginTop: 8, textAlign: "right" }}><Badge person={betWinner}>+{POINTS_FINAL}</Badge></div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* CHAMPIONSHIP */}
+            <SectionLabel style={{ marginTop: 24 }}>Championship · +{POINTS_CHAMP} pts</SectionLabel>
+            <div style={{ borderRadius: 12, border: `2px solid ${GOLD}66`, background: "#fffdf5", padding: "18px 18px", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+              <div style={{ fontSize: 14, color: "#888", marginBottom: 14 }}>🏆 Who wins the TGL SoFi Cup?</div>
+              <div style={{ display: "flex", gap: 10 }}>
+                {[["Rudy","Atlanta Drive"],["Jacki","Boston Common"]].map(([person, team]) => {
+                  const clr = person === "Rudy" ? R : J;
+                  const isSel = champion === person;
+                  return <button key={person} onClick={() => toggleChampion(person)} style={{ flex: 1, padding: "14px 8px", borderRadius: 10, fontFamily: "inherit", fontSize: 15, fontWeight: isSel ? 800 : 500, border: isSel ? `2px solid ${clr}` : "2px solid #ddd", background: isSel ? `${clr}12` : "#fafbfc", color: isSel ? clr : "#666" }}>{isSel ? "🏆 " : ""}{person} · {team}{isSel ? ` +${POINTS_CHAMP}` : ""}</button>;
+                })}
+              </div>
+            </div>
+
+            {/* ── SIDE WAGERS ── */}
+            <div style={{ marginTop: 28, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 2px 12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontSize: 11, letterSpacing: 4, color: "#bbb", textTransform: "uppercase", fontWeight: 700 }}>Side Wagers</div>
+                {pendingCount > 0 && (
+                  <div style={{ background: "#ef4444", color: "#fff", borderRadius: 10, fontSize: 10, padding: "2px 8px", fontWeight: 800 }}>{pendingCount} new</div>
+                )}
+              </div>
+              {!showWagerForm && (
+                <button onClick={() => setShowWagerForm(true)} style={{ fontSize: 13, fontWeight: 700, color: userClr, border: `1px solid ${userClr}44`, background: `${userClr}0d`, borderRadius: 8, padding: "6px 14px" }}>
+                  + Propose
+                </button>
+              )}
+            </div>
+
+            {showWagerForm && (
+              <div style={{ marginBottom: 12 }}>
+                <WagerForm currentUser={currentUser} onSubmit={proposeWager} onCancel={() => setShowWagerForm(false)} />
+              </div>
+            )}
+
+            {wagerList.length === 0 && !showWagerForm ? (
+              <div style={{ borderRadius: 12, border: "1px dashed #e0e2e8", padding: "28px 18px", textAlign: "center", color: "#ccc", fontSize: 14, marginBottom: 40 }}>
+                No side wagers yet — tap <strong>+ Propose</strong> to challenge {currentUser === "Rudy" ? "Jacki" : "Rudy"}!
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 40 }}>
+                {wagerList.map(([id, wager]) => (
+                  <WagerCard key={id} id={id} wager={wager} currentUser={currentUser}
+                    onAccept={(id) => updateWager(id, { status: "accepted" })}
+                    onDecline={(id) => updateWager(id, { status: "declined" })}
+                    onSettle={(id, winner) => updateWager(id, { status: "settled", settledWinner: winner })}
+                    onDelete={deleteWager}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function ScoreCard({ name, pts, wins, sub, color }) {
+      return (
+        <div style={{ flex: 1, borderRadius: 14, padding: "18px 12px 16px", textAlign: "center", background: `${color}0f`, border: `2px solid ${color}44` }}>
+          <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: 3, color, textTransform: "uppercase", marginBottom: 4 }}>{name}</div>
+          <div style={{ fontSize: 72, fontWeight: 900, lineHeight: 1, color }}>{pts}</div>
+          <div style={{ fontSize: 11, color, opacity: 0.6, marginTop: 2, letterSpacing: 1 }}>PTS</div>
+          <div style={{ fontSize: 13, color: "#999", marginTop: 8 }}>{wins} wins</div>
+          <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>{sub}</div>
+        </div>
+      );
+    }
+    function Badge({ person, children }) {
+      const clr = person === "Rudy" ? R : J;
+      return <div style={{ display: "inline-block", padding: "5px 14px", borderRadius: 8, fontWeight: 800, fontSize: 14, flexShrink: 0, background: `${clr}12`, color: clr, border: `1px solid ${clr}44` }}>{children}</div>;
+    }
+    function SectionLabel({ children, style }) {
+      return <div style={{ fontSize: 11, letterSpacing: 4, color: "#bbb", textTransform: "uppercase", padding: "24px 2px 12px", fontWeight: 700, ...style }}>{children}</div>;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
