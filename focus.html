@@ -88,9 +88,10 @@
       padding: 12px 4px;
       text-align: center;
       font-weight: 600;
-      font-size: 14px;
+      font-size: 13px;
       color: var(--ink-soft);
       border-bottom: 3px solid transparent;
+      letter-spacing: 0.2px;
     }
     .tab.active {
       color: var(--green-dark);
@@ -369,6 +370,28 @@
       text-align: right;
     }
 
+    .tab-row {
+      display: grid;
+      grid-template-columns: 24px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+      cursor: pointer;
+    }
+    .tab-row:last-child { border-bottom: none; }
+    .tab-row:hover { background: var(--green-pale); margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: 8px; }
+    .tab-row .rank { font-weight: 800; color: var(--ink-soft); text-align: center; }
+    .tab-name .name { font-weight: 700; font-size: 15px; }
+    .tab-name .shots { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+    .tab-amount {
+      font-weight: 800;
+      font-size: 18px;
+      color: var(--gold);
+      letter-spacing: -0.3px;
+      font-variant-numeric: tabular-nums;
+    }
+
     .toast {
       position: fixed;
       bottom: 24px;
@@ -402,6 +425,9 @@
     // ---------- State ----------
     const STORAGE_KEY = "golfFocusTracker_v1";
     const CLUBS = ["Driver","3W","5W","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
+    const POINT_THRESHOLD = 7;        // focus score >= this earns a point ("focus attained")
+    const POINT_VALUE = 0.25;         // dollars per point
+    const fmtMoney = (n) => "$" + n.toFixed(2);
 
     const defaultState = () => ({
       golfers: [],
@@ -502,7 +528,7 @@
     function statsFor(golferId) {
       const shots = state.shots.filter(s => s.golferId === golferId);
       const n = shots.length;
-      if (!n) return { n: 0, avg: 0, best: 0, worst: 0, dist: {}, last10Avg: 0, byClub: {} };
+      if (!n) return { n: 0, avg: 0, best: 0, worst: 0, dist: {}, last10Avg: 0, byClub: {}, points: 0, earnings: 0 };
       const sum = shots.reduce((a, s) => a + s.focus, 0);
       const dist = {};
       for (let i = 1; i <= 10; i++) dist[i] = 0;
@@ -517,6 +543,7 @@
         byClub[s.club].sum += s.focus;
         byClub[s.club].n += 1;
       });
+      const points = shots.filter(s => s.focus >= POINT_THRESHOLD).length;
       return {
         n,
         avg: sum / n,
@@ -525,6 +552,8 @@
         dist,
         last10Avg,
         byClub,
+        points,
+        earnings: points * POINT_VALUE,
       };
     }
 
@@ -580,6 +609,7 @@
         mk("track", "Track"),
         mk("stats", "Stats"),
         mk("leaderboard", "Leaders"),
+        mk("tab", "Tab"),
       ]);
     }
 
@@ -738,6 +768,12 @@
           ]),
           el("div", { style: "height: 10px" }),
           el("div", { class: "stat-grid" }, [
+            el("div", { class: "stat" }, [el("div", { class: "num" }, String(s.points)), el("div", { class: "lbl" }, `Points (${POINT_THRESHOLD}+)`)]),
+            el("div", { class: "stat" }, [el("div", { class: "num" }, fmtMoney(s.earnings)), el("div", { class: "lbl" }, "Tab")]),
+            el("div", { class: "stat" }, [el("div", { class: "num" }, fmtMoney(POINT_VALUE)), el("div", { class: "lbl" }, "Per point")]),
+          ]),
+          el("div", { style: "height: 10px" }),
+          el("div", { class: "stat-grid" }, [
             el("div", { class: "stat" }, [el("div", { class: "num" }, String(s.best)), el("div", { class: "lbl" }, "Best")]),
             el("div", { class: "stat" }, [el("div", { class: "num" }, String(s.worst)), el("div", { class: "lbl" }, "Worst")]),
             el("div", { class: "stat" }, [el("div", { class: "num" }, fmt(100 * (s.dist[7]+s.dist[8]+s.dist[9]+s.dist[10]) / s.n, 0) + "%"), el("div", { class: "lbl" }, "Locked in 7+")]),
@@ -777,7 +813,9 @@
           el("div", { class: "rank" }, row.s.n ? String(i + 1) : "—"),
           el("div", {}, [
             el("div", { class: "name" }, row.g.name),
-            el("div", { class: "shots" }, row.s.n ? `${row.s.n} shot${row.s.n===1?"":"s"} · last 10: ${fmt(row.s.last10Avg)}` : "no shots"),
+            el("div", { class: "shots" }, row.s.n
+              ? `${row.s.n} shot${row.s.n===1?"":"s"} · ${row.s.points}pt · ${fmtMoney(row.s.earnings)}`
+              : "no shots"),
           ]),
           el("div", { class: "shots" }, ""),
           el("div", { class: "avg" }, row.s.n ? fmt(row.s.avg) : "—"),
@@ -791,6 +829,52 @@
           el("h2", {}, "Tools"),
           el("button", { class: "submit", onclick: openAddGolfer }, "+ Add golfer"),
           el("button", { class: "submit secondary", style: "margin-top: 8px", onclick: openExport }, "Export data"),
+        ]),
+      ]);
+    }
+
+    function renderTabView() {
+      if (state.golfers.length === 0) {
+        return el("section", {}, el("div", { class: "card" }, el("div", { class: "empty" }, [
+          el("div", { class: "big" }, "🧾"),
+          el("div", {}, "Add a golfer to start a tab."),
+        ])));
+      }
+
+      const rows = state.golfers
+        .map(g => ({ g, s: statsFor(g.id) }))
+        .sort((a, b) => b.s.points - a.s.points);
+
+      const totalPoints = rows.reduce((a, r) => a + r.s.points, 0);
+      const totalEarnings = totalPoints * POINT_VALUE;
+
+      return el("section", {}, [
+        el("div", { class: "card" }, [
+          el("h2", {}, "House total"),
+          el("div", { class: "stat-grid" }, [
+            el("div", { class: "stat" }, [el("div", { class: "num" }, String(totalPoints)), el("div", { class: "lbl" }, "Points")]),
+            el("div", { class: "stat" }, [el("div", { class: "num" }, fmtMoney(totalEarnings)), el("div", { class: "lbl" }, "On the tab")]),
+            el("div", { class: "stat" }, [el("div", { class: "num" }, `${POINT_THRESHOLD}+`), el("div", { class: "lbl" }, "Threshold")]),
+          ]),
+          el("div", { style: "color: var(--ink-soft); font-size: 12px; margin-top: 10px; text-align: center;" },
+            `Each shot with focus ${POINT_THRESHOLD}+ earns 1 point worth ${fmtMoney(POINT_VALUE)}.`),
+        ]),
+        el("div", { class: "card" }, [
+          el("h2", {}, "Golfer tabs"),
+          ...rows.map((row, i) => el("div", {
+            class: "tab-row",
+            onclick: () => { selectGolfer(row.g.id); setView("stats"); },
+          }, [
+            el("div", { class: "rank" }, row.s.points ? String(i + 1) : "—"),
+            el("div", { class: "tab-name" }, [
+              el("div", { class: "name" }, row.g.name),
+              el("div", { class: "shots" },
+                row.s.n
+                  ? `${row.s.points} of ${row.s.n} shots · avg ${fmt(row.s.avg)}`
+                  : "no shots logged"),
+            ]),
+            el("div", { class: "tab-amount" }, fmtMoney(row.s.earnings)),
+          ])),
         ]),
       ]);
     }
@@ -878,6 +962,7 @@
       let body;
       if (state.view === "stats") body = renderStats();
       else if (state.view === "leaderboard") body = renderLeaderboard();
+      else if (state.view === "tab") body = renderTabView();
       else body = renderTrack();
       root.appendChild(body);
 
