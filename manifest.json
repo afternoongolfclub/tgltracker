@@ -1,0 +1,13 @@
+{
+  "name": "Golf Focus Tracker",
+  "short_name": "Focus",
+  "description": "Track focus score per shot for multiple golfers, with a points-based running tab.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f4ec",
+  "theme_color": "#0f4c2e",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
